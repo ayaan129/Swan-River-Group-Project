@@ -1537,7 +1537,8 @@ def admin_update_user():
 def admin_view_profile():
     if 'user' not in session:
         return redirect(url_for('index'))
-    return render_template('admin-view-profile.html', user=session['user'])
+    user = User.query.get(session['user']['id'])
+    return render_template('admin-view-profile.html', user=user)
 
 @app.route('/admin_view_users')
 def admin_view_users():
