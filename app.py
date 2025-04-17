@@ -1387,10 +1387,15 @@ def generate_latex_content(form, user):
 
 #--------------------------------------------------------------------------------------------------------------------------------------
 #sign in
-@app.route('/sign_in', methods=['POST'])
+@app.route('/', methods=['POST'])
 def sign_in():
     email = request.form['email']
     password = request.form['password']
+
+    # Validate email domain
+    if not email.endswith('@cougarnet.uh.edu'):
+        logger.warning(f"Invalid email domain: {email}")
+        return render_template('login.html', error="Only @cougarnet.uh.edu emails are allowed.")
 
     # Query the database for the user
     user = User.query.filter_by(email=email).first()
@@ -1445,6 +1450,11 @@ def create_account():
         last_name = request.form['last_name']
         email = request.form['email'].lower()  # Normalize email
         password = request.form['password']
+
+        # Validate email domain
+        if not email.endswith('@cougarnet.uh.edu'):
+            logger.warning(f"Invalid email domain during account creation: {email}")
+            return render_template('login.html', error="Only @cougarnet.uh.edu emails are allowed for account creation.")
 
         # Concatenate name (first + middle + last)
         name = f"{first_name} {middle_name} {last_name}".strip()  # Remove extra spaces if middle_name is empty
