@@ -1387,7 +1387,7 @@ def generate_latex_content(form, user):
 
 #--------------------------------------------------------------------------------------------------------------------------------------
 #sign in
-@app.route('/', methods=['POST'])
+@app.route('/sign_in', methods=['POST'])
 def sign_in():
     email = request.form['email']
     password = request.form['password']
