@@ -1071,17 +1071,10 @@ def basic_user_form_status():
     if 'user' not in session:
         return redirect(url_for('index'))
     
-    # Fetch user's email from session
-    email = session['user']['email']
-    user = User.query.filter_by(email=email).first()
+    user_id = session['user']['id']
+    requests = ReleaseFormRequest.query.filter_by(user_id=user_id).all()
 
-    # Fetch all forms (Drafts + Submitted Forms)
-    user_full_name = f"{user.first_name} {user.middle_name or ''} {user.last_name}".strip()
-    requests = ReleaseFormRequest.query.filter(
-        ReleaseFormRequest.student_name.like(f"%{user_full_name}%")
-    ).all()
-    
-    return render_template("basic_user_form_status.html", user=session['user'], requests=requests)
+    return render_template('basic_user_form_status.html', requests=requests)
 
 def download_signature(signature_url, user_id):
     """
