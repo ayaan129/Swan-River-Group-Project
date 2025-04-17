@@ -32,7 +32,9 @@
         <p>Name: <span>{{ user.first_name }}{% if user.middle_name %} {{ user.middle_name }}{% endif %} {{ user.last_name }}</span></p>
         <p>Email: <span>{{ user.email }}</span></p>
         <p>Role: <span>{{ user.role }}</span></p>
-        <p>Status: <span>{{ user.status }}</span></p><br>
+        <p>Status: <span>{{ user.status }}</span></p>
+        <p>Clearance Level: <span>{{ user.clearance_level }}</span></p>
+        <p>Manager: <span>{{ 'Yes' if user.manager == 'yes' else 'No' }}</span></p><br>
         <button class="back" onclick="redirectToEditProfile()">Edit Profile</button>
         <button class="back" onclick="redirectToAdminHome()">Back to Home</button>
     </div>
