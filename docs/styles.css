@@ -255,6 +255,29 @@ input.box {
     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
 }
 
+button.wide-btn {
+    display: inline-block;
+    padding: 20px;
+    text-align: center;
+    background-color: var(--secondary-color);
+    color: var(--darker-white);
+    border: none;
+    outline: none; 
+    box-shadow: none; 
+    font-size: 20px;
+    font-weight: bold;
+    border-radius: 8px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    width: 280px;
+    margin-bottom: 10px;
+}
+
+button.wide-btn:hover {
+    background-color: #1d3636;
+}
+
 button.admin-btn {
     display: inline-block;
     padding: 20px;
