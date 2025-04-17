@@ -73,19 +73,26 @@
         
         function renderUserList(users) {
             const userListElement = document.getElementById("userList");
-            userListElement.innerHTML = users.map((user, index) => `
-                <tr>
-                    <td>${user.name}</td>
-                    <td>${user.email}</td>
-                    <td>${user.role}</td>
-                    <td>${user.status}</td>
-                    <td>
-                        <button class="suspend-btn" onclick="openModal(${index})">Suspend</button>
-                    </td>
-                </tr>
-            `).join('');
+            userListElement.innerHTML = users.map((user, index) => {
+                const first = user.first_name || '';
+                const middle = user.middle_name ? user.middle_name + ' ' : '';
+                const last = user.last_name || '';
+                const fullName = (first + ' ' + middle + last).trim();
+
+                return `
+                    <tr>
+                        <td>${fullName}</td>
+                        <td>${user.email}</td>
+                        <td>${user.role}</td>
+                        <td>${user.status}</td>
+                        <td>
+                            <button class="suspend-btn" onclick="openModal(${index})">Suspend</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
         }
-        
+
         function openModal(index) {
             currentUserIndex = index;
             document.getElementById('confirmModal').style.display = "block";
