@@ -99,6 +99,9 @@ class User(db.Model):
     status = db.Column(db.String(20), default="active")
     signature_url = db.Column(db.String(255), nullable=True)
     pdf_url = db.Column(db.String(255), nullable=True)
+    clearance_level = db.Column(db.Integer, default=0)
+    manager = db.Column(db.String(20), default="no")
+    allowed_forms = db.Column(db.Text)
 
 
 # Form Request Model
@@ -188,6 +191,12 @@ class ReleaseFormRequest(db.Model):
     reviewed_by = db.Column(db.String(100), nullable=True)  # Stores the name/email of the reviewer
     reviewed_date = db.Column(db.DateTime, nullable=True)  # When the review was completed
 
+    # For tracking who request has been delegated to and by
+    delegated_to_id = db.Column(db.Integer, db.ForeignKey('User.id'), nullable=True)
+    delegated_by_id = db.Column(db.Integer, db.ForeignKey('User.id'), nullable=True)
+    delegated_to = db.relationship('User', foreign_keys=[delegated_to_id])
+    delegated_by = db.relationship('User', foreign_keys=[delegated_by_id])   
+
     def __repr__(self):
         return f"<ReleaseFormRequest {self.id} - {self.student_name} - {self.peoplesoft_id}>"
 
@@ -241,7 +250,7 @@ def submit_course_load():
         signature_url = data.get('signature_url', None)
 
         approval_status = "pending" if is_final_submission else "draft"
-        form_name = "RCL"
+        form_name = "Reduced Course Load Form"
 
         form_instance = None
 
@@ -587,7 +596,7 @@ def submit_release_form():
         signature_url = data.get('signature_url', None)
 
         approval_status = "pending" if is_final_submission else "draft"
-        form_name = "Release Records"
+        form_name = "Release Form"
 
         form_instance = None
 
@@ -710,13 +719,13 @@ def edit_draft_form(form_id):
 
         # Check form name and redirect accordingly
         form_name = form.form_name.lower() if form.form_name else ""
-        if "name/ssn change" in form_name:
+        if "ssn form" in form_name:
             template = "basic_user_ssn.html"  # Load the SSN/Name Change Form
 
-        if "release records" in form_name:
+        if "release form" in form_name:
             template = "basic_user_release.html" # Load the Release Form
             
-        if "rcl" in form_name:
+        if "reduced course load form" in form_name:
             template = "basic_user_course_load.html" # Load reduce course load form
 
         print(f"Draft {form_id} loaded successfully, rendering {template}")  # Confirm successful retrieval
@@ -734,7 +743,7 @@ def submit_ssn_form():
         data = request.form
         is_final_submission = data.get("final_submission") == "true"
         form_id = data.get("form_id")
-        form_name = "Name/SSN Change"
+        form_name = "SSN Form"
 
         # Extract and format names
         student_name = f"{data.get('first_name', '').strip()} {data.get('middle_name', '').strip()} {data.get('last_name', '').strip()}"
@@ -960,6 +969,7 @@ def authorized():
 
         # Store user details properly in session
         session['user'] = {
+            'id': user.id,
             'first_name': user.first_name,
             'middle_name': user.middle_name if user.middle_name else '',
             'last_name': user.last_name,
@@ -1397,6 +1407,7 @@ def sign_in():
             last_name = name_parts[-1] if len(name_parts) > 1 else ""  # Last name
 
             session['user'] = {
+                'id': user.id,
                 'first_name': first_name,
                 'middle_name': middle_name,
                 'last_name': last_name,
@@ -1486,9 +1497,16 @@ def create_account():
 def admin_home():
     if 'user' not in session:
         return redirect(url_for('index'))
+    
+    # Get the current user from database to check clearance level
+    user = User.query.filter_by(email=session['user']['email']).first()
+    if not user:
+        return redirect(url_for('index'))
+    
     return render_template(
         'admin.html',
-        user_name=f"{session['user']['first_name']} {session['user'].get('middle_name', '').strip()} {session['user']['last_name']}".strip()
+        user_name=f"{session['user']['first_name']} {session['user'].get('middle_name', '').strip()} {session['user']['last_name']}".strip(),
+        clearance_level=user.clearance_level  # Pass clearance level to template
     )
 
 @app.route('/admin_create_user')
@@ -1538,9 +1556,173 @@ def admin_request_forms():
     if 'user' not in session:
         return redirect(url_for('index'))
 
-    # Fetch all submitted forms
-    requests = ReleaseFormRequest.query.all()
-    return render_template('admin-request-forms.html', requests=requests)
+    user_id = session['user']['id']
+    user = User.query.get(user_id)
+
+    # Base Query
+    requests_query = ReleaseFormRequest.query \
+        .options(db.joinedload(ReleaseFormRequest.delegated_to)) \
+        .options(db.joinedload(ReleaseFormRequest.delegated_by))
+
+    # Level 4 can see all requests
+    if user.clearance_level == 4:
+        requests = requests_query.all()
+    
+    # Level 3 Manager can see all requests
+    elif user.clearance_level == 3 and user.manager == 'yes':
+        requests = requests_query.all()
+    
+    # Level 3 Non-Manager can see requests delegated to them
+    elif user.clearance_level == 3 and user.manager == 'no':
+        requests = requests_query.filter(
+            ReleaseFormRequest.delegated_to_id == user_id
+        ).all()
+    
+    # Level 2 Manager can see Release and SSN forms or delegated to them
+    elif user.clearance_level == 2 and user.manager == 'yes':
+        requests = requests_query.filter(
+            (ReleaseFormRequest.form_name.in_(['Release Form', 'SSN Form'])) |
+            (ReleaseFormRequest.delegated_to_id == user_id)
+        ).all()
+    
+    # Level 2 Non-Manager can see requests delegated to them
+    elif user.clearance_level == 2 and user.manager == 'no':
+        requests = requests_query.filter(
+            ReleaseFormRequest.delegated_to_id == user_id
+        ).all()
+    
+    # Level 1 Manager can see Release forms or delegated to them
+    elif user.clearance_level == 1 and user.manager == 'yes':
+        requests = requests_query.filter(
+            (ReleaseFormRequest.form_name == 'Release Form') |
+            (ReleaseFormRequest.delegated_to_id == user_id)
+        ).all()
+    
+    # Level 1 Non-Manager can see requests delegated to them
+    elif user.clearance_level == 1 and user.manager == 'no':
+        requests = requests_query.filter(
+            ReleaseFormRequest.delegated_to_id == user_id
+        ).all()
+    
+    else:
+        requests = []
+
+    return render_template('admin-request-forms.html',
+                         requests=requests,
+                         clearance_level=user.clearance_level,
+                         manager=user.manager)
+
+# Route to handle delegation
+@app.route('/get_delegatable_users/<form_name>')
+def get_delegatable_users(form_name):
+    if 'user' not in session:
+        return jsonify({'users': []})
+
+    user_id = session['user']['id']
+    user = User.query.get(user_id)
+
+    users_query = User.query.filter(
+        User.status == 'active',
+        User.id != user_id  # Don't delegate to self
+    )
+
+    delegatable_users = []
+
+    # Level 4 can delegate to any manager
+    if user.clearance_level == 4:
+        if form_name == "Release Form":
+            delegatable_users = users_query.filter(
+                User.manager == 'yes',
+                User.clearance_level.in_([1, 2, 3])
+            ).all()
+        elif form_name == "SSN Form":
+            delegatable_users = users_query.filter(
+                User.manager == 'yes',
+                User.clearance_level.in_([2, 3])
+            ).all()
+        elif form_name == "Reduced Course Load Form":
+            delegatable_users = users_query.filter(
+                User.manager == 'yes',
+                User.clearance_level == 3
+            ).all()
+
+    # Level 3 Manager can delegate to Level 3 Non-Managers
+    elif user.clearance_level == 3 and user.manager == 'yes':
+        delegatable_users = users_query.filter(
+            User.manager == 'no',
+            User.clearance_level == 3
+        ).all()
+
+    # Level 2 Manager can delegate to Level 2 Non-Managers
+    elif user.clearance_level == 2 and user.manager == 'yes':
+        delegatable_users = users_query.filter(
+            User.manager == 'no',
+            User.clearance_level == 2
+        ).all()
+
+    # Level 1 Manager can delegate to Level 1 Non-Managers
+    elif user.clearance_level == 1 and user.manager == 'yes':
+        delegatable_users = users_query.filter(
+            User.manager == 'no',
+            User.clearance_level == 1
+        ).all()
+
+    users_data = [{
+        'id': u.id,
+        'first_name': u.first_name,
+        'last_name': u.last_name,
+        'level': u.clearance_level,
+        'manager': u.manager
+    } for u in delegatable_users]
+
+    return jsonify({'users': users_data})
+
+# Route to handle saving delegation
+@app.route('/delegate_request/<int:request_id>', methods=['POST'])
+def delegate_request(request_id):
+    if 'user' not in session:
+        return jsonify({'message': 'Unauthorized'}), 401
+
+    data = request.get_json()
+    delegated_to_id = data.get('delegated_to_id')
+
+    request_obj = ReleaseFormRequest.query.get(request_id)
+    request_obj.delegated_to_id = delegated_to_id
+    request_obj.delegated_by_id = session['user']['id']
+
+    db.session.commit()
+
+    return jsonify({'message': 'Delegation successful'})
+
+# Helper function 
+import json
+
+def get_allowed_forms_by_clearance(level):
+    if level == 4:
+        return ["Release Form", "SSN Form", "Reduced Course Load Form"]  # All forms
+    elif level == 3:
+        return ["Release Form", "SSN Form", "Reduced Course Load Form"] # All forms
+    elif level == 2:
+        return ["Release Form", "SSN Form"]
+    else:
+        return ["Release Form"]  # Level 1 can't manage forms outside their scope
+
+
+# Update admin's clearance_level
+@app.route('/update_clearance/<int:user_id>', methods=['POST'])
+def update_clearance(user_id):
+    data = request.get_json()
+    new_level = data.get('clearance_level')
+
+    user = User.query.get(user_id)
+
+    user.clearance_level = new_level
+    user.allowed_forms = json.dumps(get_allowed_forms_by_clearance(new_level))
+
+    db.session.commit()
+
+    return jsonify({'message': 'Clearance level and allowed forms updated'})
+
 
 @app.route('/admin_previous_forms')
 def admin_previous_forms():
@@ -1566,6 +1748,7 @@ def update_user_profile():
     db.session.commit()
     
     session['user'] = {
+        'id': user.id,
         'first_name': user.first_name,
         'middle_name': user.middle_name if user.middle_name else '',
         'last_name': user.last_name,
@@ -1740,6 +1923,71 @@ def upload_user_signature():
     except Exception as e:
         logging.error(f"Error uploading signature: {str(e)}")
         return jsonify({"error": f"Error uploading signature: {str(e)}"}), 500
+    
+@app.route('/admin_manage_admins')
+def admin_manage_admins():
+    if 'user' not in session:
+        return redirect(url_for('index'))
+    
+    # Check if user is Level 4 admin
+    user = User.query.get(session['user']['id'])
+    if not user or user.clearance_level != 4:
+        flash("Access Denied: You don't have permission to access this page", "error")
+        return redirect(url_for('admin_home'))
+    
+    # Get all users except the current admin
+    users = User.query.filter(User.id != user.id).all()
+    return render_template('admin-manage-admins.html', users=users)
+
+@app.route('/update_admin_status', methods=['POST'])
+def update_admin_status():
+    if 'user' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Verify current user is Level 4 admin
+    current_user = User.query.get(session['user']['id'])
+    if not current_user or current_user.clearance_level != 4:
+        return jsonify({"error": "Access Denied"}), 403
+    
+    data = request.get_json()
+    user_id = data.get('user_id')
+    clearance_level = int(data.get('clearance_level', 1))
+    manager = data.get('manager', 'no')
+    
+    # Validate inputs
+    if clearance_level not in [1, 2, 3, 4]:
+        return jsonify({"error": "Invalid clearance level"}), 400
+    
+    if manager not in ['yes', 'no']:
+        return jsonify({"error": "Invalid manager status"}), 400
+    
+    # Prevent demoting yourself
+    if user_id == current_user.id and clearance_level != 4:
+        return jsonify({"error": "You cannot demote yourself"}), 400
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    
+    # Update user
+    user.clearance_level = clearance_level
+    user.manager = manager
+    
+    # Update allowed forms based on clearance level
+    if clearance_level == 4:
+        user.allowed_forms = json.dumps(["Release Form", "SSN Form", "Reduced Course Load Form"])
+    elif clearance_level == 3:
+        user.allowed_forms = json.dumps(["Release Form", "SSN Form", "Reduced Course Load Form"])
+    elif clearance_level == 2:
+        user.allowed_forms = json.dumps(["Release Form", "SSN Form"])
+    else:
+        user.allowed_forms = json.dumps(["Release Form"])
+    
+    db.session.commit()
+    
+    return jsonify({"message": "Admin status updated successfully"})
+
+#-------------------------------Approve/Decline Requests----------------------------------
 
 @app.route('/approve_request/<int:request_id>', methods=['POST'])
 def approve_request(request_id):
@@ -1787,6 +2035,41 @@ def update_comment(request_id):
         db.session.commit()  
         return jsonify({"message": "Comment saved successfully"}), 200
     return jsonify({"error": "Request not found"}), 404 
+
+# Route to Admin Request Stats Page
+@app.route('/admin_request_stats')
+def admin_request_stats():
+    if 'user' not in session or session['user']['role'] != 'admin':
+        return redirect(url_for('login'))
+
+    manager_filter = request.args.get('manager')
+    level_filter = request.args.get('level')
+
+    query = User.query.filter(User.role == 'admin')
+
+    if manager_filter:
+        query = query.filter(User.manager == manager_filter)
+    if level_filter:
+        query = query.filter(User.clearance_level == int(level_filter))
+
+    admins = query.all()
+
+    data = []
+    for admin in admins:
+        pending = ReleaseFormRequest.query.filter_by(delegated_to_id=admin.id, approval_status='pending').count()
+        approved = ReleaseFormRequest.query.filter_by(delegated_to_id=admin.id, approval_status='approved').count()
+        delegations = ReleaseFormRequest.query.filter_by(delegated_by_id=admin.id).count()
+
+        data.append({
+            'name': f"{admin.first_name} {admin.last_name}",
+            'level': admin.clearance_level,
+            'manager': 'Yes' if admin.manager == 'yes' else 'No',
+            'pending': pending,
+            'approved': approved,
+            'delegations': delegations
+        })
+
+    return render_template('admin-request-stats.html', data=data)
     
 # Helper functions
 def _build_auth_url(scopes=None, state=None):
@@ -1807,3 +2090,4 @@ if __name__ == '__main__':
         db.create_all()
     app.run(host='0.0.0.0', port=8000, debug=True)
     #app.run(host='localhost', port=5000, debug=True) 
+    
